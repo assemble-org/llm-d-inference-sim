@@ -331,20 +331,42 @@ func (c *Communication) handleHTTP(req endpoint.Request, respBuilder responseBui
 	}
 }
 
-// handleStream peeks the first response before committing to a streamed
-// reply. Once ctx.Response.SetBodyStream is called, fasthttp writes the
-// status line and headers before any body byte is read from the stream, so
-// the status code can no longer change afterwards. Peeking lets a request
-// that fails before producing any content (e.g. queue full, or a validation
-// error caught only once processing starts) still be reported with its real
-// HTTP status instead of being forced into a 200 SSE error frame.
+// handleStream commits to a streamed reply in one of two ways.
+//
+// By default it peeks the first response first. Once ctx.Response.SetBodyStream
+// is called, fasthttp writes the status line and headers before any body byte
+// is read from the stream, so the status code can no longer change afterwards.
+// Peeking lets a request that fails before producing any content (e.g. queue
+// full, or a validation error caught only once processing starts) still be
+// reported with its real HTTP status instead of being forced into a 200 SSE
+// error frame. The cost is that the client sees no bytes at all, not even the
+// status line, until the first token: a long time-to-first-token looks to the
+// client like a backend that never answered.
+//
+// With stream-headers-early the status and headers are committed as soon as
+// the request is accepted (after time-to-headers, if set), which is what vLLM
+// does: queueing and prefill happen after the 200. A failure that arrives
+// after that point is sent in-stream by sendStream as an error frame followed
+// by [DONE]. The two delays are independent, so a client's handling of a slow
+// first token and of a slow status line can each be exercised on its own.
 func (c *Communication) handleStream(ctx *fasthttp.RequestCtx, channel common.Channel[*endpoint.ResponseInfo],
 	respBuilder responseBuilder, numChoices int) {
-	first := <-channel.Channel
-	if first != nil && first.Err != nil {
-		go drainResponseChannel(channel)
-		c.sendError(ctx, first.Err, false)
-		return
+	var first *endpoint.ResponseInfo
+	if cfg := c.runtime.Config(); cfg.StreamHeadersEarly {
+		if cfg.Latencies.TimeToHeaders > 0 {
+			time.Sleep(cfg.Latencies.TimeToHeaders)
+		}
+		// fasthttp otherwise holds the status line and headers in its write
+		// buffer until the first body chunk, which would put them back on the
+		// first token's schedule.
+		ctx.Response.ImmediateHeaderFlush = true
+	} else {
+		first = <-channel.Channel
+		if first != nil && first.Err != nil {
+			go drainResponseChannel(channel)
+			c.sendError(ctx, first.Err, false)
+			return
+		}
 	}
 
 	ctx.SetStatusCode(fasthttp.StatusOK)

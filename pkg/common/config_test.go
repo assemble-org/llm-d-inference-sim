@@ -417,6 +417,8 @@ var _ = Describe("admin struct tags", func() {
 			"failure-types":                     "",
 			"fake-metrics":                      "",
 			"image-emission-rate":               "",
+			"stream-headers-early":              "",
+			"time-to-headers":                   "",
 		}))
 	})
 
