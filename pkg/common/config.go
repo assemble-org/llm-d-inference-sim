@@ -194,6 +194,13 @@ type Configuration struct {
 	// simulator then peeks the first result and can still answer a late
 	// failure with its real HTTP status.
 	StreamHeadersEarly bool `yaml:"stream-headers-early" json:"stream-headers-early" admin:"configurable"`
+	// StreamAbortAfterTokens, when positive, closes the client connection of
+	// a streaming response abruptly once that many token chunks have been
+	// sent: no finish chunk, no usage chunk, no [DONE], no terminating HTTP
+	// chunk. It is what a client sees when the serving process dies
+	// mid-generation, and lets a gateway's truncation handling be exercised
+	// without killing the process. Zero disables it.
+	StreamAbortAfterTokens int `yaml:"stream-abort-after-tokens" json:"stream-abort-after-tokens" admin:"configurable"`
 	// FailureInjectionRate is the probability (0-100) of injecting failures
 	FailureInjectionRate int `yaml:"failure-injection-rate" json:"failure-injection-rate" admin:"configurable"`
 	// FailureTypes is a list of specific failure types to inject (empty means all types)
@@ -620,6 +627,9 @@ func (c *Configuration) validate() error {
 	}
 	if c.Latencies.TimeToHeaders < 0 {
 		return errors.New("time to headers cannot be negative")
+	}
+	if c.StreamAbortAfterTokens < 0 {
+		return errors.New("stream abort after tokens cannot be negative")
 	}
 	if c.Latencies.TimeToFirstTokenStdDev < 0 {
 		return errors.New("time to first token standard deviation cannot be negative")

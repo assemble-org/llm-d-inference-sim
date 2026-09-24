@@ -468,6 +468,9 @@ func newStreamState(numChoices int) streamState {
 // sendOrFail writes chunk to w, reporting a chunk-send failure on err. A nil
 // chunk is a no-op. Returns true on success; the caller should return when it
 // sees false (the failure has already been reported on ctx).
+// errStreamAborted fails the body pipe when stream-abort-after-tokens fires.
+var errStreamAborted = errors.New("stream aborted by stream-abort-after-tokens")
+
 func (c *Communication) sendOrFail(ctx *fasthttp.RequestCtx, w *bufio.Writer, chunk sseChunk, failMsg string) bool {
 	if chunk == nil {
 		return true
@@ -487,6 +490,7 @@ func (c *Communication) sendStream(ctx *fasthttp.RequestCtx, channel common.Chan
 		w := bufio.NewWriter(pw)
 		var respCtx endpoint.ResponseContext
 		state := newStreamState(numChoices)
+		tokenChunks := 0
 
 		defer func() {
 			w.Flush()  //nolint:errcheck
@@ -544,6 +548,22 @@ func (c *Communication) sendStream(ctx *fasthttp.RequestCtx, channel common.Chan
 			}
 			if stop {
 				break
+			}
+			if response.Tokens != nil && response.ToolCall == nil {
+				tokenChunks++
+			}
+			if abort := c.runtime.Config().StreamAbortAfterTokens; abort > 0 && tokenChunks >= abort {
+				// Die mid-generation: what a client sees when the serving
+				// process is killed. The body pipe is failed so fasthttp
+				// stops writing, and the connection is closed under it so
+				// the client gets an unexpected EOF rather than a clean
+				// end of the chunked body.
+				go drainResponseChannel(channel)
+				pw.CloseWithError(errStreamAborted) //nolint:errcheck
+				if conn := ctx.Conn(); conn != nil {
+					conn.Close() //nolint:errcheck
+				}
+				return
 			}
 		}
 

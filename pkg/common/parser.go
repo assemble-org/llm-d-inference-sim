@@ -161,6 +161,7 @@ func ParseCommandParamsAndLoadConfig(eng Engine) (*Configuration, error) {
 	f.DurationVar(&config.Latencies.TimeToFirstToken, "time-to-first-token", config.Latencies.TimeToFirstToken, "Time to first token, e.g. 100ms")
 	f.BoolVar(&config.StreamHeadersEarly, "stream-headers-early", config.StreamHeadersEarly, "Commit a streaming response's HTTP 200 and SSE headers when the request is accepted, before the first token (vLLM behaviour); failures after that point are sent in-stream")
 	f.DurationVar(&config.Latencies.TimeToHeaders, "time-to-headers", config.Latencies.TimeToHeaders, "With stream-headers-early: delay before the HTTP status and headers are committed, independent of time-to-first-token, e.g. 2s")
+	f.IntVar(&config.StreamAbortAfterTokens, "stream-abort-after-tokens", config.StreamAbortAfterTokens, "Close a streaming response's connection abruptly after this many token chunks, with no finish chunk or [DONE] (a backend dying mid-generation); 0 disables")
 
 	f.DurationVar(&config.Latencies.PrefillOverhead, "prefill-overhead", config.Latencies.PrefillOverhead, "Time to prefill, e.g. 100ms. This argument is ignored if <time-to-first-token> is not 0.")
 	f.DurationVar(&config.Latencies.PrefillTimePerToken, "prefill-time-per-token", config.Latencies.PrefillTimePerToken, "Time to prefill per token, e.g. 100ms")
