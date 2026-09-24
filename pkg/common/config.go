@@ -187,6 +187,20 @@ type Configuration struct {
 	// FakeMetricsRefreshInterval defines how often function-based fake metrics are recalculated, defaults to 100ms
 	FakeMetricsRefreshInterval time.Duration `yaml:"fake-metrics-refresh-interval" json:"fake-metrics-refresh-interval"`
 
+	// StreamHeadersEarly makes a streaming response commit its HTTP 200 and
+	// SSE headers as soon as the request is accepted, before the first token,
+	// as vLLM does. A failure that surfaces after that point is reported
+	// in-stream as an error frame followed by [DONE]. Off by default: the
+	// simulator then peeks the first result and can still answer a late
+	// failure with its real HTTP status.
+	StreamHeadersEarly bool `yaml:"stream-headers-early" json:"stream-headers-early" admin:"configurable"`
+	// StreamAbortAfterTokens, when positive, closes the client connection of
+	// a streaming response abruptly once that many token chunks have been
+	// sent: no finish chunk, no usage chunk, no [DONE], no terminating HTTP
+	// chunk. It is what a client sees when the serving process dies
+	// mid-generation, and lets a gateway's truncation handling be exercised
+	// without killing the process. Zero disables it.
+	StreamAbortAfterTokens int `yaml:"stream-abort-after-tokens" json:"stream-abort-after-tokens" admin:"configurable"`
 	// FailureInjectionRate is the probability (0-100) of injecting failures
 	FailureInjectionRate int `yaml:"failure-injection-rate" json:"failure-injection-rate" admin:"configurable"`
 	// FailureTypes is a list of specific failure types to inject (empty means all types)
@@ -394,6 +408,12 @@ type DatasetConfig struct {
 type LatenciesConfig struct {
 	// TimeToFirstToken time before the first token will be returned
 	TimeToFirstToken time.Duration `yaml:"time-to-first-token" json:"time-to-first-token" admin:"configurable" rebuild:"latency"`
+	// TimeToHeaders is the delay before a streaming response commits its HTTP
+	// status and headers when stream-headers-early is on. Independent of
+	// time-to-first-token, so "headers at once, first token much later" and
+	// "no headers for a while" can each be simulated. Ignored when
+	// stream-headers-early is off.
+	TimeToHeaders time.Duration `yaml:"time-to-headers" json:"time-to-headers" admin:"configurable"`
 	// TimeToFirstTokenStdDev standard deviation for time before the first token will be returned
 	// optional, default is 0, can't be more than 30% of TimeToFirstToken, will not
 	// cause the actual time to first token to differ by more than 70% from TimeToFirstToken
@@ -604,6 +624,12 @@ func (c *Configuration) validate() error {
 	}
 	if c.Latencies.TimeToFirstToken < 0 {
 		return errors.New("time to first token cannot be negative")
+	}
+	if c.Latencies.TimeToHeaders < 0 {
+		return errors.New("time to headers cannot be negative")
+	}
+	if c.StreamAbortAfterTokens < 0 {
+		return errors.New("stream abort after tokens cannot be negative")
 	}
 	if c.Latencies.TimeToFirstTokenStdDev < 0 {
 		return errors.New("time to first token standard deviation cannot be negative")
